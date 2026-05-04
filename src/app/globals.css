@@ -1,0 +1,7 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: var(--font-inter), sans-serif;
+}
+
+/* Custom CSS variables will go here as dictated by taste-skill */
