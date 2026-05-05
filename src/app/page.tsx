@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useAudioRecorder } from '@/hooks/useAudioRecorder';
 import SetupScreen from '@/components/SetupScreen';
 import ReviewScreen from '@/components/ReviewScreen';
+import { MessageSquareText, ChevronDown, ChevronUp } from 'lucide-react';
 
 export type WizardStep = 'setup' | 'recording' | 'processing' | 'review' | 'success';
 
@@ -21,8 +22,19 @@ export default function MeetingWizard() {
   const [processingStatus, setProcessingStatus] = useState('');
   const [isSending, setIsSending] = useState(false);
 
+  // UI State
+  const [showLiveTranscript, setShowLiveTranscript] = useState(false);
+  const transcriptEndRef = useRef<HTMLDivElement>(null);
+
   // Core Audio Hook
   const recorder = useAudioRecorder();
+
+  // Auto-scroll live transcript
+  useEffect(() => {
+    if (showLiveTranscript && transcriptEndRef.current) {
+      transcriptEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [recorder.liveTranscript, showLiveTranscript]);
 
   // Handlers for Step Transitions
   const handleStartSession = (title: string, emails: string[]) => {
@@ -126,25 +138,59 @@ export default function MeetingWizard() {
           )}
 
           {step === 'recording' && (
-            <div className="space-y-12 text-center animate-in fade-in zoom-in-[0.98] duration-500 flex flex-col items-center">
-              <div className="relative flex items-center justify-center">
-                <div className="absolute inset-0 bg-red-500/20 rounded-full blur-xl animate-pulse scale-150"></div>
-                <div className="h-4 w-4 bg-red-500 rounded-full animate-ping absolute"></div>
-                <div className="h-4 w-4 bg-red-500 rounded-full relative z-10"></div>
-              </div>
+            <div className="w-full max-w-lg mx-auto flex flex-col items-center animate-in fade-in zoom-in-[0.98] duration-500">
               
-              <div className="font-mono text-6xl sm:text-7xl font-light text-[#1A1A1A] tabular-nums tracking-tighter">
-                {Math.floor(recorder.elapsedTime / 60).toString().padStart(2, '0')}:
-                {(recorder.elapsedTime % 60).toString().padStart(2, '0')}
+              {/* Primary Recording Controls */}
+              <div className="space-y-10 text-center flex flex-col items-center w-full z-20 pb-4 relative">
+                <div className="relative flex items-center justify-center mt-4">
+                  <div className="absolute inset-0 bg-red-500/20 rounded-full blur-xl animate-pulse scale-[2.5]"></div>
+                  <div className="h-4 w-4 bg-red-500 rounded-full animate-ping absolute"></div>
+                  <div className="h-4 w-4 bg-red-500 rounded-full relative z-10"></div>
+                </div>
+                
+                <div className="font-mono text-6xl sm:text-7xl font-light text-[#1A1A1A] tabular-nums tracking-tighter">
+                  {Math.floor(recorder.elapsedTime / 60).toString().padStart(2, '0')}:
+                  {(recorder.elapsedTime % 60).toString().padStart(2, '0')}
+                </div>
+                
+                <button 
+                  onClick={handleEndMeeting}
+                  className="bg-red-500 text-white px-10 py-5 rounded-full font-medium tracking-wide hover:bg-red-600 transition-all shadow-xl shadow-red-500/20 active:scale-95 flex items-center gap-3"
+                >
+                  <div className="h-3 w-3 bg-white rounded-sm"></div>
+                  End Meeting
+                </button>
+
+                {/* Toggle Live Transcript Button */}
+                <button 
+                  onClick={() => setShowLiveTranscript(!showLiveTranscript)}
+                  className="flex items-center justify-center gap-2 text-xs font-bold tracking-widest uppercase text-[#1A1A1A]/40 hover:text-[#1A1A1A] transition-colors mt-2 py-3 px-6 rounded-full hover:bg-black/5 active:scale-95"
+                >
+                  <MessageSquareText size={16} />
+                  {showLiveTranscript ? 'Hide Live Transcript' : 'Show Live Transcript'}
+                  {showLiveTranscript ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                </button>
               </div>
-              
-              <button 
-                onClick={handleEndMeeting}
-                className="bg-red-500 text-white px-10 py-5 rounded-full font-medium tracking-wide hover:bg-red-600 transition-all shadow-xl shadow-red-500/20 active:scale-95 flex items-center gap-3"
+
+              {/* Live Transcript Roll-down */}
+              <div 
+                className={`w-full overflow-hidden transition-all duration-500 ease-in-out ${showLiveTranscript ? 'max-h-[50vh] opacity-100 mt-2' : 'max-h-0 opacity-0'}`}
               >
-                <div className="h-3 w-3 bg-white rounded-sm"></div>
-                End Meeting
-              </button>
+                <div className="p-5 sm:p-6 rounded-[2rem] bg-white/60 border border-black/5 backdrop-blur-md max-h-[40vh] overflow-y-auto shadow-sm relative">
+                  {!recorder.liveTranscript ? (
+                    <div className="flex flex-col items-center justify-center h-24 text-[#1A1A1A]/40 italic text-sm font-medium animate-pulse">
+                      Listening to audio...
+                    </div>
+                  ) : (
+                    <div className="text-[#1A1A1A]/80 text-lg sm:text-xl leading-relaxed font-medium">
+                      {recorder.liveTranscript}
+                      <span className="inline-block w-2.5 h-5 bg-red-500/60 animate-pulse ml-1.5 align-middle rounded-sm"></span>
+                      <div ref={transcriptEndRef} className="h-4" />
+                    </div>
+                  )}
+                </div>
+              </div>
+
             </div>
           )}
 

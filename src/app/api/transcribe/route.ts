@@ -59,7 +59,7 @@ Your task is to provide a highly accurate, verbatim transcript with strict speak
 CRITICAL INSTRUCTIONS:
 1. SPEAKER IDENTIFICATION: Identify each speaker consistently (e.g., Speaker A, Speaker B, Speaker C).
 2. TIMESTAMPS: Provide a timestamp [MM:SS] at the beginning of each new speaker's turn.
-3. ORIGINAL LANGUAGE: Transcribe exactly what is said in the language it was spoken. Do NOT translate the transcript into a single language. If they code-switch mid-sentence, the transcript must reflect that exactly.
+3. ORIGINAL LANGUAGE: The primary language spoken in this audio is Romanian. Transcribe exactly what is said. Pay extreme attention to Romanian grammar, spelling, and diacritics (ă, â, î, ș, ț). Do NOT translate the transcript. If they code-switch mid-sentence, the transcript must reflect that exactly.
 4. FORMAT: Use the following format strictly:
    [MM:SS] Speaker X: <text>
 
@@ -70,7 +70,7 @@ Example:
 Now, transcribe the entire attached meeting audio:`;
 
     const transcriptionResponse = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3-flash-preview',
       contents: [
         {
           fileData: {
@@ -95,15 +95,13 @@ Now, transcribe the entire attached meeting audio:`;
 CRITICAL INSTRUCTION: ALL OUTPUT TEXT (except JSON keys) MUST BE WRITTEN IN ROMANIAN.
 
 Extract the following:
-1. "executiveSummary": A brief 2-3 sentence overview of what the meeting was about and the main outcome (in Romanian).
-2. "keyDecisions": A list of decisions that were agreed upon (in Romanian). If none, return an empty array.
-3. "actionItems": A list of next steps, including the assignee if mentioned (in Romanian).
+1. "overview": A brief 1-2 sentence overview of what the entire meeting was about and the main outcome (in Romanian).
+2. "checklist": A bulleted list of tasks or things that need to be finished/done based on the discussion (in Romanian).
 
 Return the result STRICTLY as a valid JSON object matching this schema:
 {
-  "executiveSummary": "string",
-  "keyDecisions": ["string", "string"],
-  "actionItems": ["string", "string"]
+  "overview": "string",
+  "checklist": ["string", "string"]
 }
 
 Do NOT wrap the JSON in markdown code blocks (\`\`\`json). Return ONLY the raw JSON string.
@@ -112,7 +110,7 @@ Transcript:
 ${transcript}`;
 
     const summaryResponse = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3-flash-preview',
       contents: [summaryPrompt],
       config: {
         temperature: 0.2,
@@ -125,7 +123,7 @@ ${transcript}`;
       summaryData = JSON.parse(summaryResponse.text || "{}");
     } catch (parseError) {
       console.error('Failed to parse summary JSON:', summaryResponse.text);
-      summaryData = { executiveSummary: summaryResponse.text, keyDecisions: [], actionItems: [] };
+      summaryData = { overview: summaryResponse.text, checklist: [] };
     }
 
     console.log(`[Transcription] Process complete! Returning payload.`);

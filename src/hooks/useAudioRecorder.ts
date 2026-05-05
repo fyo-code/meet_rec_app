@@ -6,8 +6,10 @@ export function useAudioRecorder() {
   const [status, setStatus] = useState<RecordingStatus>('idle');
   const [elapsedTime, setElapsedTime] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [liveTranscript, setLiveTranscript] = useState<string>('');
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const speechRecognitionRef = useRef<any>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -60,6 +62,39 @@ export function useAudioRecorder() {
 
       // Collect data every 1 second so we have chunks in memory
       mediaRecorder.start(1000); 
+      
+      // Setup Live Transcription (Web Speech API)
+      const SpeechRecognitionAPI = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (SpeechRecognitionAPI) {
+        setLiveTranscript('');
+        const recognition = new SpeechRecognitionAPI();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'ro-RO'; // Set default language to Romanian
+        
+        recognition.onresult = (event: any) => {
+          let currentTranscript = '';
+          for (let i = 0; i < event.results.length; i++) {
+            currentTranscript += event.results[i][0].transcript + ' ';
+          }
+          setLiveTranscript(currentTranscript);
+        };
+        
+        // Auto-restart if it stops unexpectedly while still recording
+        recognition.onend = () => {
+          if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+            try { recognition.start(); } catch (e) {}
+          }
+        };
+
+        try {
+          recognition.start();
+          speechRecognitionRef.current = recognition;
+        } catch (e) {
+          console.warn('Speech recognition failed to start:', e);
+        }
+      }
+
       setStatus('recording');
       setElapsedTime(0);
     } catch (err: any) {
@@ -74,6 +109,9 @@ export function useAudioRecorder() {
   const pauseRecording = useCallback(() => {
     if (mediaRecorderRef.current && status === 'recording') {
       mediaRecorderRef.current.pause();
+      if (speechRecognitionRef.current) {
+        speechRecognitionRef.current.stop();
+      }
       setStatus('paused');
     }
   }, [status]);
@@ -81,6 +119,9 @@ export function useAudioRecorder() {
   const resumeRecording = useCallback(() => {
     if (mediaRecorderRef.current && status === 'paused') {
       mediaRecorderRef.current.resume();
+      if (speechRecognitionRef.current) {
+        try { speechRecognitionRef.current.start(); } catch (e) {}
+      }
       setStatus('recording');
     }
   }, [status]);
@@ -102,6 +143,11 @@ export function useAudioRecorder() {
         if (streamRef.current) {
           streamRef.current.getTracks().forEach(track => track.stop());
           streamRef.current = null;
+        }
+
+        if (speechRecognitionRef.current) {
+          speechRecognitionRef.current.stop();
+          speechRecognitionRef.current = null;
         }
         
         resolve(audioBlob);
@@ -146,6 +192,7 @@ export function useAudioRecorder() {
     status,
     elapsedTime,
     error,
+    liveTranscript,
     startRecording,
     pauseRecording,
     resumeRecording,

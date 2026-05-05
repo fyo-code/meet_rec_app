@@ -13,7 +13,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    const { executiveSummary, keyDecisions, actionItems } = summary;
+    const { overview, checklist } = summary;
 
     // Create a beautiful HTML email template
     const html = `
@@ -42,26 +42,17 @@ export async function POST(request: Request) {
           </div>
 
           <div class="section">
-            <div class="section-title">Executive Summary</div>
+            <div class="section-title">Overview</div>
             <div class="card">
-              ${executiveSummary}
+              ${overview}
             </div>
           </div>
 
-          ${keyDecisions && keyDecisions.length > 0 ? `
+          ${checklist && checklist.length > 0 ? `
           <div class="section">
-            <div class="section-title">Key Decisions</div>
+            <div class="section-title">Task Checklist</div>
             <div>
-              ${keyDecisions.map((d: string) => `<div class="decision-item">${d}</div>`).join('')}
-            </div>
-          </div>
-          ` : ''}
-
-          ${actionItems && actionItems.length > 0 ? `
-          <div class="section">
-            <div class="section-title">Action Items</div>
-            <div>
-              ${actionItems.map((a: string) => `<div class="action-item">${a}</div>`).join('')}
+              ${checklist.map((task: string) => `<div class="action-item">${task}</div>`).join('')}
             </div>
           </div>
           ` : ''}

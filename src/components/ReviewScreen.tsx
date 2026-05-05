@@ -14,9 +14,8 @@ export default function ReviewScreen({ transcript, summary, onSend, isSending }:
   const [activeTab, setActiveTab] = useState<'summary' | 'transcript'>('summary');
 
   // Safely extract data with fallbacks
-  const execSummary = summary?.executiveSummary || 'No summary was generated.';
-  const decisions = summary?.keyDecisions || [];
-  const actions = summary?.actionItems || [];
+  const overview = summary?.overview || 'No overview was generated.';
+  const checklist = summary?.checklist || [];
   const rawTranscript = transcript || 'No transcript was generated.';
 
   return (
@@ -56,42 +55,27 @@ export default function ReviewScreen({ transcript, summary, onSend, isSending }:
         
         {activeTab === 'summary' ? (
           <div className="space-y-10 animate-in fade-in duration-300">
-            {/* Executive Summary */}
+            {/* Overview */}
             <section className="space-y-4">
               <h3 className="text-[10px] font-bold tracking-widest uppercase text-black/40 flex items-center gap-2">
-                <Clock size={12} /> Executive Summary
+                <Clock size={12} /> Overview
               </h3>
               <p className="text-lg leading-relaxed text-[#1A1A1A] font-medium">
-                {execSummary}
+                {overview}
               </p>
             </section>
 
             <div className="w-full h-px bg-black/5" />
 
-            {/* Key Decisions */}
-            {decisions.length > 0 && (
+            {/* Checklist */}
+            {checklist.length > 0 && (
               <section className="space-y-4">
-                <h3 className="text-[10px] font-bold tracking-widest uppercase text-black/40">Key Decisions</h3>
+                <h3 className="text-[10px] font-bold tracking-widest uppercase text-black/40">Task Checklist</h3>
                 <ul className="space-y-3">
-                  {decisions.map((decision: string, idx: number) => (
-                    <li key={idx} className="flex items-start gap-4 text-[#1A1A1A] bg-[#FAF8F5] p-5 rounded-2xl border border-black/5">
-                      <span className="text-[#C9A84C] mt-0.5 text-lg">✦</span>
-                      <span className="leading-snug">{decision}</span>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            )}
-
-            {/* Action Items */}
-            {actions.length > 0 && (
-              <section className="space-y-4">
-                <h3 className="text-[10px] font-bold tracking-widest uppercase text-black/40">Action Items</h3>
-                <ul className="space-y-3">
-                  {actions.map((action: string, idx: number) => (
+                  {checklist.map((task: string, idx: number) => (
                     <li key={idx} className="flex items-start gap-4 text-[#1A1A1A] bg-white border border-black/10 p-5 rounded-2xl shadow-sm">
                       <span className="text-black/20 mt-0.5"><CheckSquare size={20} /></span>
-                      <span className="leading-snug">{action}</span>
+                      <span className="leading-snug">{task}</span>
                     </li>
                   ))}
                 </ul>
