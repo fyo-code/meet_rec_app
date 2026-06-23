@@ -1,63 +1,29 @@
 import { GoogleGenAI } from '@google/genai';
 import { NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
 
-// Initialize Gemini API
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
-// The App Router allows configuring max duration for API routes on Vercel
-// Since transcription and summarization of a 60 min meeting takes time, we need a high limit.
-// Vercel Pro allows up to 300s, Hobby up to 60s. For long meetings, this might hit a timeout on Hobby.
-// But for now we set maxDuration to 300.
-export const maxDuration = 60; 
+export const maxDuration = 300; // 5 minutes — localhost has no limit, Vercel Pro allows 300s
 
 export async function POST(request: Request) {
-  let tempFilePath: string | null = null;
-  let uploadedFileRef: any = null;
-
   try {
-    const formData = await request.formData();
-    const audioFile = formData.get('audio') as File | null;
-    const mimeType = formData.get('mimeType') as string || 'audio/webm';
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    
+    const { fileUri, mimeType, participantCount } = await request.json();
 
-    if (!audioFile) {
-      return NextResponse.json({ error: 'Missing audio file in request' }, { status: 400 });
+    if (!fileUri || !mimeType) {
+      return NextResponse.json({ error: 'No fileUri or mimeType provided' }, { status: 400 });
     }
 
-    console.log(`[Transcription] Received audio file via FormData: ${(audioFile.size / 1024 / 1024).toFixed(2)} MB`);
-    
-    // 1. Convert uploaded File to Buffer
-    const arrayBuffer = await audioFile.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+    // ── 1. Transcription Pipeline (with auto-continuation) ──────────────
+    console.log(`[Transcription] Starting for URI: ${fileUri}`);
+    console.log(`[Transcription] Participant count: ${participantCount || 'not specified'}`);
 
-    tempFilePath = path.join(os.tmpdir(), `audio-${Date.now()}.webm`);
-    fs.writeFileSync(tempFilePath, buffer);
-
-    console.log(`[Transcription] Uploading file to Gemini File API (size: ${(buffer.length / 1024 / 1024).toFixed(2)} MB)...`);
-
-    // 2. Upload to Gemini File API
-    // Using the new @google/genai SDK format
-    uploadedFileRef = await ai.files.upload({
-      file: tempFilePath,
-      config: {
-        mimeType: mimeType || 'audio/webm',
-        displayName: 'Meeting Audio',
-      }
-    });
-
-    console.log(`[Transcription] File uploaded to Gemini: ${uploadedFileRef.name}`);
-
-    // 3. Prompt Gemini for Transcription + Diarization
-    console.log(`[Transcription] Initiating transcription...`);
-    const transcriptionPrompt = `You are a highly skilled meeting transcription and analysis AI.
+    const basePrompt = `You are a highly skilled meeting transcription and analysis AI.
 The attached audio file contains a real-life meeting. The speakers may speak in Romanian, English, or seamlessly mix both languages (code-switching).
 
 Your task is to provide a highly accurate, verbatim transcript with strict speaker diarization.
 
 CRITICAL INSTRUCTIONS:
-1. SPEAKER IDENTIFICATION: Identify each speaker consistently (e.g., Speaker A, Speaker B, Speaker C).
+1. SPEAKER IDENTIFICATION: There are exactly ${participantCount || 'multiple'} speakers in this meeting. Distinguish their voices carefully and label them Speaker A, Speaker B, Speaker C, etc.
 2. TIMESTAMPS: Provide a timestamp [MM:SS] at the beginning of each new speaker's turn.
 3. ORIGINAL LANGUAGE: The primary language spoken in this audio is Romanian. Transcribe exactly what is said. Pay extreme attention to Romanian grammar, spelling, and diacritics (ă, â, î, ș, ț). Do NOT translate the transcript. If they code-switch mid-sentence, the transcript must reflect that exactly.
 4. FORMAT: Use the following format strictly:
@@ -69,26 +35,71 @@ Example:
 
 Now, transcribe the entire attached meeting audio:`;
 
-    const transcriptionResponse = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: [
-        {
-          fileData: {
-            fileUri: uploadedFileRef.uri,
-            mimeType: uploadedFileRef.mimeType
-          }
-        }, // The file we just uploaded
-        transcriptionPrompt
-      ],
-      config: {
-        temperature: 0.1, // Low temperature for high factual accuracy
+    // Helper: extract the last [MM:SS] timestamp from a transcript chunk
+    const getLastTimestamp = (text: string): string | null => {
+      const matches = text.match(/\[(\d{1,2}:\d{2})\]/g);
+      return matches ? matches[matches.length - 1].replace(/[\[\]]/g, '') : null;
+    };
+
+    // Auto-continuation loop: if Gemini hits its output ceiling, keep going
+    const MAX_CONTINUATIONS = 10; // Safety cap (covers ~10 hours of meetings)
+    let fullTranscript = '';
+
+    for (let attempt = 0; attempt < MAX_CONTINUATIONS; attempt++) {
+      const isFirstAttempt = attempt === 0;
+      const lastTimestamp = getLastTimestamp(fullTranscript);
+
+      const prompt = isFirstAttempt
+        ? basePrompt
+        : `Continue transcribing the same meeting audio from timestamp [${lastTimestamp}] onward. 
+Pick up EXACTLY where the previous transcription ended. Do NOT repeat any content before [${lastTimestamp}].
+Use the same format: [MM:SS] Speaker X: <text>
+Continue until the end of the audio:`;
+
+      console.log(`[Transcription] Attempt ${attempt + 1}${!isFirstAttempt ? ` (continuing from ${lastTimestamp})` : ''}...`);
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-pro',
+        contents: [
+          {
+            fileData: {
+              fileUri: fileUri,
+              mimeType: mimeType
+            }
+          },
+          prompt
+        ],
+        config: {
+          temperature: 0.1,
+          maxOutputTokens: 65536,
+        }
+      });
+
+      const chunkText = response.text || '';
+      const finishReason = (response as any).candidates?.[0]?.finishReason;
+      const safetyRatings = (response as any).candidates?.[0]?.safetyRatings;
+      
+      console.log(`[Transcription] Attempt ${attempt + 1} done. Chunk: ${chunkText.length} chars. Finish: ${finishReason || 'N/A'}`);
+      
+      // If we got 0 chars, log the full response for debugging
+      if (chunkText.length === 0) {
+        console.error(`[Transcription] WARNING: Empty response from Gemini!`);
+        console.error(`[Transcription] Full response candidates:`, JSON.stringify((response as any).candidates, null, 2));
+        console.error(`[Transcription] Safety ratings:`, JSON.stringify(safetyRatings, null, 2));
       }
-    });
 
-    const transcript = transcriptionResponse.text;
-    console.log(`[Transcription] Transcription complete. Length: ${transcript?.length} characters.`);
+      fullTranscript += (isFirstAttempt ? '' : '\n') + chunkText;
 
-    // 4. Summarization Pipeline
+      // If the model finished naturally (not truncated), we're done
+      if (finishReason !== 'MAX_TOKENS') {
+        console.log(`[Transcription] Complete! Total transcript: ${fullTranscript.length} chars across ${attempt + 1} call(s).`);
+        break;
+      }
+
+      console.log(`[Transcription] Output was truncated (MAX_TOKENS). Auto-continuing...`);
+    }
+
+    // ── 2. Summarization Pipeline ───────────────────────────────────────
     console.log(`[Transcription] Initiating summarization...`);
     const summaryPrompt = `Based on the following meeting transcript, provide a professional and concise summary.
 
@@ -107,13 +118,14 @@ Return the result STRICTLY as a valid JSON object matching this schema:
 Do NOT wrap the JSON in markdown code blocks (\`\`\`json). Return ONLY the raw JSON string.
 
 Transcript:
-${transcript}`;
+${fullTranscript}`;
 
     const summaryResponse = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.5-flash',
       contents: [summaryPrompt],
       config: {
         temperature: 0.2,
+        maxOutputTokens: 8192,
         responseMimeType: "application/json",
       }
     });
@@ -126,34 +138,15 @@ ${transcript}`;
       summaryData = { overview: summaryResponse.text, checklist: [] };
     }
 
-    console.log(`[Transcription] Process complete! Returning payload.`);
-
-    // Cleanup: We don't necessarily need to delete from Gemini File API immediately, 
-    // but it's good practice. Google deletes them after 48h automatically.
-    try {
-      await ai.files.delete({ name: uploadedFileRef.name });
-    } catch (e) {
-      console.warn('Could not delete file from Gemini immediately:', e);
-    }
-
-    // Cleanup temp file
-    if (tempFilePath && fs.existsSync(tempFilePath)) {
-      fs.unlinkSync(tempFilePath);
-    }
+    console.log(`[Transcription] Pipeline complete! Returning payload.`);
 
     return NextResponse.json({
-      transcript,
+      transcript: fullTranscript,
       summary: summaryData,
     });
 
   } catch (error: any) {
     console.error('[Transcription Error]:', error);
-    
-    // Cleanup on error
-    if (tempFilePath && fs.existsSync(tempFilePath)) {
-      fs.unlinkSync(tempFilePath);
-    }
-    
     return NextResponse.json({ error: error.message || 'An unknown error occurred during transcription' }, { status: 500 });
   }
 }

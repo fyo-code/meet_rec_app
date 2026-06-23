@@ -4,13 +4,14 @@ import { useState } from 'react';
 import { UserPlus, Mic, X } from 'lucide-react';
 
 interface SetupScreenProps {
-  onStart: (title: string, emails: string[]) => void;
+  onStart: (title: string, emails: string[], participantCount: number) => void;
 }
 
 export default function SetupScreen({ onStart }: SetupScreenProps) {
   const [title, setTitle] = useState('');
   const [emailInput, setEmailInput] = useState('');
   const [emails, setEmails] = useState<string[]>([]);
+  const [participantCount, setParticipantCount] = useState<number>(2);
 
   const handleAddEmail = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' || e.key === ',') {
@@ -78,6 +79,30 @@ export default function SetupScreen({ onStart }: SetupScreenProps) {
           />
         </div>
 
+        {/* Participant Count Input (Mobile Friendly) */}
+        <div className="space-y-4">
+          <label className="text-xs font-bold tracking-widest uppercase text-black/40 flex items-center gap-2">
+            Number of Speakers in Room
+          </label>
+          <div className="flex items-center gap-2 bg-black/5 p-1.5 rounded-2xl w-fit">
+            <button 
+              onClick={() => setParticipantCount(Math.max(1, participantCount - 1))}
+              className="w-12 h-12 flex items-center justify-center rounded-xl bg-white shadow-sm text-2xl font-light text-[#1A1A1A] hover:bg-[#FAF8F5] active:scale-90 transition-all"
+            >
+              −
+            </button>
+            <div className="w-16 text-center text-2xl font-semibold text-[#1A1A1A] tabular-nums">
+              {participantCount}
+            </div>
+            <button 
+              onClick={() => setParticipantCount(Math.min(20, participantCount + 1))}
+              className="w-12 h-12 flex items-center justify-center rounded-xl bg-white shadow-sm text-2xl font-light text-[#1A1A1A] hover:bg-[#FAF8F5] active:scale-90 transition-all"
+            >
+              +
+            </button>
+          </div>
+        </div>
+
         {/* CTA */}
         <div className="pt-4">
           <button 
@@ -87,7 +112,7 @@ export default function SetupScreen({ onStart }: SetupScreenProps) {
               if (pendingEmail && !finalEmails.includes(pendingEmail) && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(pendingEmail)) {
                 finalEmails.push(pendingEmail);
               }
-              onStart(title || 'Untitled Meeting', finalEmails);
+              onStart(title || 'Untitled Meeting', finalEmails, participantCount);
             }}
             className="group flex items-center justify-center gap-3 bg-[#1A1A1A] text-[#FAF8F5] px-8 py-4 rounded-full font-medium hover:scale-[1.02] hover:shadow-xl hover:shadow-black/10 transition-all duration-300 w-full active:scale-95"
           >

@@ -60,7 +60,8 @@ export function useAudioRecorder() {
         }
       };
 
-      // Collect data every 1 second so we have chunks in memory
+      // Collect data in 1-second chunks (fixes silent drops on long 40+ min recordings)
+      // Without a timeslice, browsers try to hold the entire recording in a single RAM buffer and crash/drop it.
       mediaRecorder.start(1000); 
       
       // Setup Live Transcription (Web Speech API)

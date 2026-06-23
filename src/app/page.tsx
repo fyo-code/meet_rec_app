@@ -14,6 +14,7 @@ export default function MeetingWizard() {
   // Shared Session State
   const [meetingTitle, setMeetingTitle] = useState('');
   const [participants, setParticipants] = useState<string[]>([]);
+  const [participantCount, setParticipantCount] = useState<number>(2);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const [transcript, setTranscript] = useState<string | null>(null);
   const [summary, setSummary] = useState<any | null>(null);
@@ -37,9 +38,10 @@ export default function MeetingWizard() {
   }, [recorder.liveTranscript, showLiveTranscript]);
 
   // Handlers for Step Transitions
-  const handleStartSession = (title: string, emails: string[]) => {
+  const handleStartSession = (title: string, emails: string[], count: number) => {
     setMeetingTitle(title);
     setParticipants(emails);
+    setParticipantCount(count);
     setStep('recording');
     recorder.startRecording();
   };
@@ -49,20 +51,102 @@ export default function MeetingWizard() {
     if (blob) {
       setAudioBlob(blob);
       setStep('processing');
-      setProcessingStatus('Uploading audio securely...');
+      setProcessingStatus('Uploading & Synthesizing Audio...');
       
       try {
-        setProcessingStatus('Uploading & Synthesizing Audio...');
-        
-        // Use FormData to send the audio directly to our API route
-        const formData = new FormData();
-        formData.append('audio', blob, `meeting-${Date.now()}.webm`);
-        formData.append('mimeType', blob.type);
-        
-        // Transcribe directly
+        const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+        if (!apiKey) throw new Error('Missing NEXT_PUBLIC_GEMINI_API_KEY');
+
+        // 1. Upload audio directly to Google's servers using the Resumable Protocol
+        // This completely bypasses Vercel's 4.5MB payload limit, and Google's 5MB single-request limit.
+        console.log(`[Upload] Audio blob size: ${(blob.size / 1024 / 1024).toFixed(2)} MB, type: ${blob.type}`);
+        const initRes = await fetch(`https://generativelanguage.googleapis.com/upload/v1beta/files?key=${apiKey}`, {
+          method: 'POST',
+          headers: {
+            'X-Goog-Upload-Protocol': 'resumable',
+            'X-Goog-Upload-Command': 'start',
+            'X-Goog-Upload-Header-Content-Length': blob.size.toString(),
+            'X-Goog-Upload-Header-Content-Type': blob.type,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ file: { display_name: meetingTitle || "Meeting Recording" } })
+        });
+
+        if (!initRes.ok) {
+          throw new Error('Failed to initialize audio upload with Gemini');
+        }
+
+        const uploadUrl = initRes.headers.get('x-goog-upload-url');
+        if (!uploadUrl) {
+          throw new Error('Failed to get upload URL from Gemini');
+        }
+
+        const uploadRes = await fetch(uploadUrl, {
+          method: 'POST',
+          headers: {
+            'X-Goog-Upload-Command': 'upload, finalize',
+            'X-Goog-Upload-Offset': '0',
+          },
+          body: blob
+        });
+
+        if (!uploadRes.ok) {
+          throw new Error('Failed to upload audio bytes to Gemini');
+        }
+
+        const uploadData = await uploadRes.json();
+        const fileUri = uploadData.file.uri;
+        const fileName = uploadData.file.name; // e.g. "files/abc123"
+        let fileState = uploadData.file.state;
+
+        console.log(`[Upload] Upload complete. URI: ${fileUri}, State: ${fileState}, Name: ${fileName}`);
+
+        // 2. CRITICAL: Wait for file to be fully processed before transcribing
+        // Large audio files need time for Google to index them. If we send a transcription
+        // request while state is still PROCESSING, Gemini returns 0 characters.
+        if (fileState === 'PROCESSING') {
+          setProcessingStatus('Audio uploaded. Waiting for Google to process the file...');
+          console.log(`[Upload] File is still PROCESSING. Polling until ACTIVE...`);
+
+          const MAX_POLLS = 60; // Up to 5 minutes of polling (60 × 5s)
+          for (let i = 0; i < MAX_POLLS; i++) {
+            await new Promise(r => setTimeout(r, 5000)); // Wait 5 seconds between polls
+            
+            const statusRes = await fetch(
+              `https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${apiKey}`
+            );
+            const statusData = await statusRes.json();
+            fileState = statusData.state;
+            
+            console.log(`[Upload] Poll ${i + 1}: state = ${fileState}`);
+            
+            if (fileState === 'ACTIVE') {
+              console.log(`[Upload] File is now ACTIVE. Proceeding to transcription.`);
+              break;
+            }
+            if (fileState === 'FAILED') {
+              throw new Error('Google failed to process the audio file. Please try recording again.');
+            }
+          }
+
+          if (fileState !== 'ACTIVE') {
+            throw new Error('Audio file processing timed out. The file may be too large or corrupted.');
+          }
+        }
+
+        setProcessingStatus('Transcribing & analyzing your meeting...');
+
+        // 3. Pass only the lightweight file URI string to our API route
         const res = await fetch('/api/transcribe', {
           method: 'POST',
-          body: formData,
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            fileUri: fileUri,
+            mimeType: blob.type,
+            participantCount: participantCount
+          })
         });
 
         if (!res.ok) {
